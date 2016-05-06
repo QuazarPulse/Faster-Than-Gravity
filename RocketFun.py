@@ -1,7 +1,7 @@
 import pygame as pg
 from pygame.locals import *
 import random as rd
-import time, sys
+import time
 import math as m
 
 pg.mixer.init()
@@ -45,23 +45,26 @@ def calculDesVitesses(vFusee,playerRect,bodies,dT=0.1):
         if abs(bodiesRect[i].centery)>playerRect.centery: Fy-=Fyint
         else: Fy+=Fyint
     vFusee=[vFusee[0]+(Fx*dT),vFusee[1]+(Fy*dT)]
-    print (vFusee)
+    #print (vFusee)
     return(vFusee)
 
 def textureToMass(texture):
     mass=1.9*(10**17)
     return(mass)
 
-def randomSpawner(bodies):
+def randomSpawner(bodies,minDistance,iter=0):
     n=rd.randrange(0,5,1)
+    maxIter=10
     if n==0: s=sBody("blackhole.png")
     if n==1: s=sBody("Earth.png")
     if n==2: s=sBody("Aldebaran.png")
     if n==3: s=sBody("ringworld.png")
     if n==4: s=sBody("sun.png")
     for i in range(len(bodies)):
-        if s.rect.colliderect(bodies[i].rect):
-            s=randomSpawner(bodies)
+        if s.rect.colliderect(bodies[i].rect) and iter<maxIter:
+            s=randomSpawner(bodies,minDistance,iter+1)
+        elif abs(s.rect.centerx-bodies[i].rect.centerx)<100 and bodies[i].age<(3*minDistance) and iter<maxIter:
+            s=randomSpawner(bodies,minDistance,iter+1)
     return s
 
 def pause(music,screen):
@@ -74,6 +77,17 @@ def pause(music,screen):
         for event in pg.event.get():
             if event.type == pg.KEYUP:
                 if event.key == pg.K_ESCAPE:
+                    return time.clock()
+            if event.type == pg.QUIT:
+                pg.display.quit()
+                music.stop()
+
+def leGameOver(music):
+    music.set_volume(0.1)
+    while 1:
+        for event in pg.event.get():
+            if event.type == pg.KEYUP:
+                if event.key == pg.K_RETURN:
                     return True
             if event.type == pg.QUIT:
                 pg.display.quit()
@@ -97,10 +111,10 @@ def afficheVect(fusee,dt):
     return [startpos,endpos]
 
 def testForDeath(bodies,superNovaPos,playerRect):
+    if superNovaPos+50<= playerRect.centery: return True
     for i in bodies:
         ray = m.sqrt(((i.rect.centerx-playerRect.centerx)**2)+((i.rect.centery-playerRect.centery)**2))
         if ray<= i.ray: return True
-    if superNovaPos+50<= playerRect.centery: return True
     return False
 
 def textureToRay(texture):
@@ -110,19 +124,49 @@ def textureToRay(texture):
     if texture == "ringworld.png": return 28#55
     if texture == "Aldebaran.png": return 38#76
     return 1
+
+def highScoresRead():
+    file=open("hs.csv",'r')
+    text=file.readlines()
+    champs=[]
+    for i in range(len(text)): champs.append(text[i].strip('\n').split(":"))
+    file.close()
+    return(champs)
+
+def isNewHigh(score,highScores):
+    for i in range(len(highScores)):
+        if int(highScores[i][2])<score:
+            return [True,i]
+    return [False,0]
+
+def changeHighScores(score,i,name,highScores):
+    temp=highScores
+    temp=temp[:i+1]
+    temp[i]=[str(i+1),str(name),str(score)]
+    for j in range(i,len(highScores)-1):
+        highScores[j][0]=str(int(highScores[j][0])+1)
+        temp.append(highScores[j])
+    file=open("hs.csv","w")
+    for j in range(len(temp)):
+        file.write(str(temp[j][0])+":"+str(temp[j][1])+":"+str(temp[j][2])+"\n")
+    file.close()
+    return(temp)
         
 class sBody(object):
     def __init__(self,texture):
         self.text= imageLoader(texture)
         self.rect= self.text.get_rect()
-        self.rect = setRectCoordinates(self.rect,rd.randrange(0,650,1),rd.randrange(-500,-200,1))
+        self.rect = setRectCoordinates(self.rect,rd.randrange(0,650,1),-100)
         self.GM = 6.67*(10**(-11))*textureToMass(texture)
         self.ray = textureToRay(texture)
+        self.age = 0
     def move(self,v):
         self.rect = self.rect.move(0,v)
     def setCoord(self,x,y):
         self.rect.centerx = x
         self.rect.centery = y
+    def tick(self):
+        self.age+=1
 
 class rocket(object):
     def __init__(self):
@@ -139,8 +183,8 @@ class rocket(object):
 
     def move(self):
         self.rect=self.rect.move(self.speed[0],0)
-        if self.rect.left < 1: self.rect.left = 1
-        if self.rect.right > 749: self.rect.right = 749
+        if self.rect.right < 1: self.rect.left = 749
+        if self.rect.left > 749: self.rect.right = 1
 
 class affichage(object):
     def __init__(self,bottom,right,size=20):
@@ -171,26 +215,28 @@ def display():
     warningRect = warning.get_rect()
     music.play(-1)
     music.set_volume(0.6)
+    betweenBodiesSpace=75
+    maxBodiesCap=5
     isMusicOn = True
     #Toutes les lignes ci-dessus sont des préparatifs. Je stock toutes les images et la musique dont j'ai besoins par la suite.
     while 1:
         supernova.setCoord(375,1200)
         player = rocket()
         bodies=[]
-        for i in range(0,4):
-            bodies.append(randomSpawner(bodies))
+        for i in range(0,1):
+            bodies.append(randomSpawner(bodies,betweenBodiesSpace))
         backG.bottom,backG2.bottom = 600,-424
         scoreCount=0
         vScroling=1
         move_ticker =0
-        vSupernova=-1
+        vSupernova=-2
         gameOver=False
         while gameOver==False:
             t0=time.clock()
             for event in pg.event.get():
                 if event.type == pg.KEYUP:
                     if event.key == pg.K_ESCAPE:
-                        pause(music,screen)
+                        t0=pause(music,screen)
                         music.set_volume(0.6)
                 if event.type == pg.QUIT:
                     pg.display.quit()
@@ -208,12 +254,12 @@ def display():
             player.move()
             coordVect=afficheVect(player,time.clock()-t0)
             backG,backG2 = backG.move(0,vScroling),backG2.move(0,vScroling)
+            if bodies[0].rect.top>800: bodies,scoreCount=bodies[1:],scoreCount+1
+            if len(bodies)<maxBodiesCap and bodies[len(bodies)-1].age>betweenBodiesSpace: bodies.append(randomSpawner(bodies,betweenBodiesSpace))
             for i in range(len(bodies)):
                 bodies[i].move(2)
-                if bodies[i].rect.top > 800:
-                     bodies[i]=randomSpawner(bodies)
-                     scoreCount+=1
-            supernova.move(vSupernova+int(player.speed[1])-int(scoreCount/20))
+                bodies[i].tick()
+            supernova.move(vSupernova+int(player.speed[1]))#-int(scoreCount/20))
             playerSupernovaDistance=supernova.rect.top-player.rect.bottom
             gameOver = testForDeath(bodies,supernova.rect.top,player.rect)
             distance.render("Distance: "+str(int(playerSupernovaDistance)))
@@ -239,6 +285,28 @@ def display():
             pg.display.flip()
             if move_ticker > 0: move_ticker -= 1
         #Le gameover apparait ici :)
+        highScores=highScoresRead()
+        l=isNewHigh(scoreCount,highScores)
+        if l[0]:
+            name=input("You have achieved a new highscore! What's youre name?: ")
+            temp=changeHighScores(scoreCount,l[1],name,highScores)
+        else: temp=highScores
+        y=250
+        x=275
+        for j in range(len(temp)):
+            hs = affichage(y+(j*30),x)
+            hs.render(str(temp[j][0])+" : "+str(temp[j][1])+" : "+str(temp[j][2]))
+            screen.blit(hs.texte, hs.rect)
+        pauseScreen=affichage(y-30,x-20,35)
+        pauseScreen.render("GAME OVER")
+        continu=affichage(y+(30*(len(temp)+1)),x-20)
+        continu.render("Press enter to restart")
+        screen.blit(pauseScreen.texte, pauseScreen.rect)
+        screen.blit(continu.texte, continu.rect)
+        pg.display.flip()
+        leGameOver(music)
+        music.set_volume(0.6)
+
 
 display()
 
